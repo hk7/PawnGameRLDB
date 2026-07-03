@@ -14,7 +14,7 @@ class Player:
 class HumanPlayer(Player):
     def __init__(self, color, name="Human"):
         super().__init__(color, name)
-        self.is_ai = False  # Controlled by clicks inside the GUI
+        self.is_ai = False
 
     def choose_action(self, env, db=None):
         return None
@@ -31,34 +31,39 @@ class DBSmartPlayer(Player):
         if not legal_moves:
             return None
 
-        # 1. Exploration phase (try a random move to map out new paths)
+        # 1. Exploration phase (random variation mapping)
         if random.random() < self.epsilon:
             chosen_move = random.choice(legal_moves)
         else:
-            # 2. Exploitation phase (Look through options and find the highest score path)
+            # 2. Exploitation phase
             best_move = None
+            
+            # Create a completely isolated copy of the board for simulation scratchpad work
+            # This completely protects en passant states from leaking or crashing the main cycle
+            scratch_board = env.board.copy()
             
             if self.color == chess.WHITE:
                 best_val = -float('inf')
                 for move in legal_moves:
-                    env.board.push(move)
-                    score = db.get_score(env.board)
-                    env.board.pop()
+                    scratch_board.push(move)
+                    score = db.get_score(scratch_board)
+                    scratch_board.pop()
+                    
                     if score > best_val:
                         best_val = score
                         best_move = move
             else:
                 best_val = float('inf')
                 for move in legal_moves:
-                    env.board.push(move)
-                    score = db.get_score(env.board)
-                    env.board.pop()
+                    scratch_board.push(move)
+                    score = db.get_score(scratch_board)
+                    scratch_board.pop()
+                    
                     if score < best_val:
                         best_val = score
                         best_move = move
                         
             chosen_move = best_move if best_move else random.choice(legal_moves)
 
-        # Encode move to action index format matching the GUI's expectation
+        # Secure action index calculation alignment
         return chosen_move.from_square * 64 + chosen_move.to_square
-    

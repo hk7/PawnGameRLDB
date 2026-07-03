@@ -11,9 +11,15 @@ class PositionDatabase:
         self.load()
 
     def get_position_key(self, board):
-        """Converts the board layout into a unique text string key."""
+        """
+        Converts the board layout into a unique text string key.
+        Includes pieces, whose turn it is, and the en passant target square!
+        """
         parts = board.fen().split(" ")
-        return f"{parts[0]} {parts[1]}"
+        # parts[0] = piece layout
+        # parts[1] = active turn (w/b)
+        # parts[3] = en passant target square (e.g., 'e3' or '-')
+        return f"{parts[0]} {parts[1]} {parts[3]}"
 
     def get_score(self, board):
         """Looks up a board position. Defaults to 0.0 if never encountered before."""
@@ -46,4 +52,3 @@ class PositionDatabase:
             logger.info(f"Database saved successfully. Size: {len(self.db)}")
         except Exception as e:
             logger.error(f"Failed to save database file: {e}")
-            
