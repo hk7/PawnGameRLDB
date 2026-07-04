@@ -1,57 +1,27 @@
 import logging
 import chess
 import random
-from tqdm import tqdm  # pip install tqdm (gives a beautiful training progress bar)
+from tqdm import tqdm  # pip install tqdm
 from environment import PawnGameEnv
 from database import PositionDatabase
-from players import DBSmartPlayer, Player
+from players import DBSmartPlayer
 
 # Set up logging to only print major updates so it doesn't flood the terminal
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("Trainer")
 
-class SemiRandomPunisher(Player):
-    """An opponent that plays randomly UNLESS there is an immediate capture 
-    or an immediate winning promotion available."""
-    def __init__(self, color, name="Punisher-Bot"):
-        super().__init__(color, name)
-        self.is_ai = True
-
-    def choose_action(self, env, db=None):
-        legal_moves = list(env.board.legal_moves)
-        if not legal_moves:
-            return None
-
-        # Priority 1: Look for an immediate winning pawn promotion
-        for move in legal_moves:
-            moving_piece = env.board.piece_at(move.from_square)
-            if moving_piece and moving_piece.piece_type == chess.PAWN:
-                if chess.square_rank(move.to_square) in [0, 7]:
-                    return move.from_square * 64 + move.to_square
-
-        # Priority 2: Look for an immediate piece capture (punish blunders!)
-        captures = [m for m in legal_moves if env.board.is_capture(m)]
-        if captures:
-            chosen_move = random.choice(captures)
-        else:
-            # Priority 3: Fallback to a completely random legal move
-            chosen_move = random.choice(legal_moves)
-
-        return chosen_move.from_square * 64 + chosen_move.to_square
-
-
-def run_training(num_games=10000, alpha=0.15):
+def run_self_play_training(num_games=20000, alpha=0.15):
     db = PositionDatabase()
     env = PawnGameEnv()
 
-    # The agent trains as White. It has a 20% exploration rate (epsilon) 
-    # during training so it discovers new positional choices.
-    agent = DBSmartPlayer(chess.WHITE, "Training-Agent", exploration_rate=0.2)
-    opponent = SemiRandomPunisher(chess.BLACK, "Trainer-Punisher")
+    # BOTH players are now Smart DB Bots! 
+    # We give them a decent exploration_rate (epsilon=0.25) so they try 
+    # new lines and variations, preventing them from playing the exact same game over and over.
+    white_agent = DBSmartPlayer(chess.WHITE, "Smart-White", exploration_rate=0.25)
+    black_agent = DBSmartPlayer(chess.BLACK, "Smart-Black", exploration_rate=0.25)
 
-    print(f"Starting background training loop for {num_games} games...")
+    print(f"Starting background SELF-PLAY training loop for {num_games} games...")
     
-    # Progress bar tracker
     for _ in tqdm(range(num_games)):
         env.reset()
         game_history = []
@@ -59,19 +29,20 @@ def run_training(num_games=10000, alpha=0.15):
         final_reward = 0.0
 
         while not game_over:
-            current_player = agent if env.board.turn == chess.WHITE else opponent
+            current_player = white_agent if env.board.turn == chess.WHITE else black_agent
             
             # Record current layout to state history before executing move
             game_history.append(chess.Board(env.board.fen()))
             
-            # Fetch move action index
+            # Fetch move action index using the shared database
             action = current_player.choose_action(env, db)
             if action is None:
                 break
                 
             _, final_reward, game_over, _, _ = env.step(action)
 
-        # BACKPROPAGATION: Game finished, update the database rewards along the match path
+        # BACKPROPAGATION: Rewind through the game and update valuations
+        # Since it's self-play, it updates all the moves that led to this outcome
         for board_state in game_history:
             db.update_score(board_state, final_reward, alpha=alpha)
 
@@ -80,6 +51,5 @@ def run_training(num_games=10000, alpha=0.15):
     print(f"Training complete! Database now contains {len(db.db)} unique position evaluations.")
 
 if __name__ == "__main__":
-    # Start with 10,000 games to build an initial baseline map
-    run_training(num_games=10000)
-    
+    # We increase the volume to 20,000 games because self-play explores deeper, higher-quality tactical paths
+    run_self_play_training(num_games=20000)
