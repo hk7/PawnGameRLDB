@@ -14,7 +14,7 @@ class PawnGameGUI:
         self.db = db
         self.players = {chess.WHITE: white_player, chess.BLACK: black_player}
         
-        self.history = []
+        self.history = []  # Stores (board, turn)
         self.game_over = False
 
         self.root = tk.Tk()
@@ -24,8 +24,12 @@ class PawnGameGUI:
         self.canvas = tk.Canvas(self.root, width=8 * self.square_size, height=8 * self.square_size)
         self.canvas.pack()
 
+        # Re-added clean high-visibility unicode definitions
         self.piece_symbols = {
-            'P': '♙', 'p': '♞', 'Q': '♕', 'q': '♛',  # Fallbacks matched to layout styles
+            'P': '♙',  # White Pawn
+            'p': '♟',  # Black Pawn
+            'Q': '♕',  # White Queen
+            'q': '♛',  # Black Queen
         }
 
         self.selected_square = None
@@ -54,11 +58,13 @@ class PawnGameGUI:
 
                 piece = self.env.board.piece_at(chess_square)
                 if piece:
-                    # Universal fallback check text strings
-                    symbol = '♙' if piece.color == chess.WHITE else '♟'
-                    if piece.piece_type == chess.QUEEN:
-                        symbol = '♕' if piece.color == chess.WHITE else '♛'
-                        
+                    # symbol = '♙' if piece.color == chess.WHITE else '♟'
+                    # if piece.piece_type == chess.QUEEN:
+                    #     symbol = '♕' if piece.color == chess.WHITE else '♛'
+
+                    # Correctly grab the exact symbol lookup character (P, p, Q, or q)
+                    symbol = self.piece_symbols.get(piece.symbol(), piece.symbol())
+
                     text_color = "#000000" if piece.color == chess.BLACK else "#ffffff"
                     self.canvas.create_text(
                         x1 + self.square_size/2, y1 + self.square_size/2,
@@ -88,11 +94,12 @@ class PawnGameGUI:
                 if chess.square_rank(clicked_square) in [0, 7]:
                     move.promotion = chess.QUEEN
 
-            # Handle explicit human en passant adjustments automatically if match conditions align
             legal_moves = list(self.env.board.legal_moves)
             if move in legal_moves:
                 action_idx = move.from_square * 64 + move.to_square
-                self.history.append(chess.Board(self.env.board.fen()))
+                
+                # Save turn details
+                self.history.append((chess.Board(self.env.board.fen()), current_turn))
 
                 try:
                     _, reward, terminated, _, _ = self.env.step(action_idx)
@@ -106,7 +113,7 @@ class PawnGameGUI:
 
                     self.root.after(300, self.check_ai_turn)
                 except Exception as e:
-                    logger.error(f"Error handling human step transaction: {e}")
+                    logger.error(f"Error: {e}")
                     traceback.print_exc()
             else:
                 self.selected_square = None
@@ -121,11 +128,10 @@ class PawnGameGUI:
 
         if getattr(player, "is_ai", False):
             try:
-                self.history.append(chess.Board(self.env.board.fen()))
+                self.history.append((chess.Board(self.env.board.fen()), current_turn))
                 action = player.choose_action(self.env, self.db)
                 
                 if action is None:
-                    logger.warning("AI returned no action, breaking loop.")
                     return
 
                 _, reward, terminated, _, _ = self.env.step(action)
@@ -138,14 +144,16 @@ class PawnGameGUI:
 
                 self.root.after(300, self.check_ai_turn)
             except Exception as e:
-                # CRITICAL: Catches and displays why the freeze occurred right in your log console!
-                logger.error(f"CRITICAL: AI failed to choose or complete its turn: {e}")
+                logger.error(f"AI Failure: {e}")
                 traceback.print_exc()
 
     def end_game(self, final_reward):
-        logger.info(f"Match over. Processing backpropagation ledger across {len(self.history)} states.")
-        for board_state in self.history:
-            self.db.update_score(board_state, final_reward)
+        logger.info(f"Processing turn-aware backpropagation across {len(self.history)} states.")
+        for board_state, turn_color in self.history:
+            if turn_color == chess.WHITE:
+                self.db.update_score(board_state, final_reward)
+            else:
+                self.db.update_score(board_state, -final_reward)
         self.db.save()
 
         if final_reward > 0:
