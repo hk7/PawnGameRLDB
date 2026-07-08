@@ -38,15 +38,20 @@ def run_self_play_training(num_games=20000, alpha=0.15):
                 
             _, final_reward, game_over, _, _ = env.step(action)
 
-        # CORRECTED BACKPROPAGATION:
-        # We must scale or invert the reward depending on who was making the decision!
-        for board_state, turn_color in game_history:
-            if turn_color == chess.WHITE:
-                # White's perspective: Positive is good, negative is bad
-                db.update_score(board_state, final_reward, alpha=alpha)
-            else:
-                # Black's perspective: Negative is good, positive is bad
-                db.update_score(board_state, -final_reward, alpha=alpha)
+        # --- FIXED DECAYED BACKPROPAGATION ---
+        # We value the entire game state string universally from White's perspective:
+        # White wins = Positive gradient decaying backwards
+        # Black wins = Negative gradient decaying backwards
+        decay_factor = 0.90 
+        running_reward = final_reward
+
+        # Loop through the game history in reverse order (from last move to first move)
+        for board_state, turn_color in reversed(game_history):
+            # Universal alignment: update score maps clean values directly
+            db.update_score(board_state, running_reward, alpha=alpha)
+            
+            # Decay the reward slightly for the previous step
+            running_reward *= decay_factor
 
     db.save()
     print(f"Training complete! Database now contains {len(db.db)} unique position evaluations.")
